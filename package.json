@@ -27,6 +27,6 @@
     "browserify": "^16.2.0",
     "http-server": "^0.11.1",
     "tsify": "^4.0.0",
-    "typescript": "^2.8.1"
+    "typescript": "^3.3.1"
   }
 }
