@@ -19,6 +19,28 @@ const Max = require('max-api');
 const perfThread = fork('./es5/perf_rnn.js', [], { silent: true });
  
 
+function startFileServer(){
+        fetch('http://127.0.0.1:8080/testServer')
+            .catch( err => {
+                                Max.post('start fileserver');
+                                exec('/Users/hermannbauerecker/Music/HAI/max/node_modules/http-server/bin/http-server -p 8010 /Users/hermannbauerecker/file-serve', (err, stdout, stderr) => {
+                                        if (err) {
+                                        Max.post('fileserver stopped with error ' + err);
+                                return;
+                                        }
+
+                                        // the *entire* stdout and stderr (buffered)
+                                        Max.post(stdout);
+                                        Max.post(`stdout: ${stdout}`);
+                                        Max.post(`stderr: ${stderr}`);
+                                }
+                )});
+}
+
+
+// node-fetch needs urls, so just serce files
+startFileServer();
+
 //==== MAX HANDLERS
 Max.addHandler("bang", () => {
 	Max.post("generate some notes");
@@ -53,43 +75,24 @@ Max.addHandler("condition", (...condition) => {
 	perfThread.send ({condition: condition});
 });
 
+Max.addHandler("resetCnt", (resetCnt) => {
+	Max.post('reset cnt - ' + resetCnt);
+	perfThread.send ({resetCnt: resetCnt});
+});
+
 Max.addHandler("tic", (pitch, vel) => {
     ss.advance()
 });
 
 
-	
-	
-function startFileServer(){
-	fetch('http://127.0.0.1:8080/testServer')
-	    .catch( err => {
-				Max.post('start fileserver');
-				exec('/Users/hermannbauerecker/Music/HAI/max/node_modules/http-server/bin/http-server -p 8010 /Users/hermannbauerecker/file-serve', (err, stdout, stderr) => {
-  					if (err) {
-    					Max.post('fileserver stopped with error ' + err);
-    				return;
-  					}
 
-  					// the *entire* stdout and stderr (buffered)
-					Max.post(stdout);
-  					Max.post(`stdout: ${stdout}`);
-  					Max.post(`stderr: ${stderr}`);
-				}
-		)});
-}
-
-								
-// node-fetch needs urls, so just serce files
-startFileServer();
-
-
-perfThread.send ({init : 'true'});
+perfThread.send ({init : 'http://127.0.0.1:8010/models/performance_rnn'});
+//perfThread.send ({init : 'file:///Users/hermannbauerecker/Music/HAI/hai9000/models/performance_rnn'});
 
 perfThread.on('message', (msg) => {
   	//Max.post('Message from child', msg);
-  	if (msg.cont){
-		Max.post('start seq');
-		emmitSeq(msg.cont);
+  	if (msg.status){
+		Max.outlet(msg.status);
 	} else if (msg.noteon){
 		//Max.post('note on - ', msg.noteon);
 		Max.outlet(msg.noteon);

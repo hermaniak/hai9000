@@ -2,24 +2,25 @@
 import * as pm from './perf_rnn_model';
 import now = require('performance-now');
 
-const GENERATION_BUFFER_SECONDS = .5;
-//const GENERATION_BUFFER_SECONDS = 5;
+const GENERATION_BUFFER_TIME = 500;
 
 // If we're this far behind, reset currentTime time to piano.now().
-const MAX_GENERATION_LAG_SECONDS = 1;
+const MAX_GENERATION_LAG = 1000;
 // If a note is held longer than this, release it.
-const MAX_NOTE_DURATION_SECONDS = 3;
+const MAX_NOTE_DURATION = 3000;
 
 let globalGain = 127;
 let currentVelocity = 100;
-let globalTempoFactor = 1;
+let globalTempoFactor = 1.;
+let resetCnt=20;
 
 const MIN_MIDI_PITCH = 0;
 const MAX_MIDI_PITCH = 127;
 const VELOCITY_BINS = 32;
 const MAX_SHIFT_STEPS = 100;
 const STEPS_PER_SECOND = 100;
-const TEMPO_FACTOR = 5;
+const MS_PER_STEP = 10
+const TEMPO_FACTOR = 1.;
 
 let prnn: pm.PerformanceRNN;
 
@@ -27,8 +28,8 @@ let play = false;
 
 const activeNotes = new Map<number, number>();
 let currentLoopId = 0;
-let currentPianoTimeSec = 0;
-
+let currentPianoTime = 0;
+let notesBufferCnt = 0;
 // When the piano roll starts in browser-time via performance.now().
 let pianoStartTimestampMs = 0;
 
@@ -59,48 +60,51 @@ function playOutput(index: number) {
       if (offset <= index && index <= offset + maxValue - minValue) {
         if (eventType === 'note_on') {
           const noteNum = index - offset;
-          console.log(`event ${eventType} - ${index - offset} - ${currentVelocity.toFixed(2)} * ${globalGain} - ${currentPianoTimeSec.toFixed(2)} - ${now().toFixed(2)}`);
+          //console.log(`event ${eventType} - ${index - offset} - ${currentVelocity.toFixed(2)} * ${globalGain} - ${currentPianoTime.toFixed(2)} - ${now().toFixed(2)}`);
+          notesBufferCnt++;
+          //console.log(`${Math.floor(now())}: ${notesBufferCnt} - note on in ${Math.floor(currentPianoTime - now())} ms`);
 	  setTimeout(() => {
+	    notesBufferCnt--;
+            //console.log(`${Math.floor(now())} - ${notesBufferCnt} - note on`);
             process.send ({'noteon': [noteNum, Math.min(Math.floor(currentVelocity * globalGain), 127),
-                Math.floor(1000 * currentPianoTimeSec) - pianoStartTimestampMs]});
-            setTimeout(() => {
-              process.send({'noteoff': [noteNum, 0,
-                Math.floor(currentPianoTimeSec * 1000) - pianoStartTimestampMs]});
-            }, 100);
-          }, (currentPianoTimeSec - now()/1000) * 1000);
-          activeNotes.set(noteNum, currentPianoTimeSec);
+                Math.floor(currentPianoTime) - pianoStartTimestampMs]});
+            //setTimeout(() => {
+              //process.send({'noteoff': [noteNum, 0,currentPianoTime - pianoStartTimestampMs]});
+            //}, 100);
+          }, (currentPianoTime - now()));
+          activeNotes.set(noteNum, currentPianoTime);
           return;
         } else if (eventType === 'note_off') {
           const noteNum = index - offset;
-          const activeNoteEndTimeSec = activeNotes.get(noteNum);
+          const activeNoteEndTime = activeNotes.get(noteNum);
           activeNotes.delete(noteNum);
           // If the note off event is generated for a note that hasn't been
           // pressed, just ignore it.
-          if (activeNoteEndTimeSec == null) {
+          if (activeNoteEndTime == null) {
              return;
           } 
-          const timeSec = Math.max(currentPianoTimeSec, activeNoteEndTimeSec + .5);
+          const timeMs = Math.max(currentPianoTime, activeNoteEndTime + .5);
           //console.log(`event ${eventType} - ${index - offset} - ${currentVelocity.toFixed(2)} - ${currentPianoTimeSec.toFixed(2)} - ${now().toFixed(2)}`);
 
 	  process.send({'noteoff': [noteNum, 0,
-                Math.floor(timeSec * 1000) - pianoStartTimestampMs]});
+                Math.floor(timeMs) - pianoStartTimestampMs]});
 
           return;
         } else if (eventType === 'time_shift') {
-          currentPianoTimeSec += (index - offset + 1) / STEPS_PER_SECOND * globalTempoFactor;
-	  console.log(`event ${eventType} - ${index - offset + 1} - ${(index - offset + 1) / STEPS_PER_SECOND * globalTempoFactor} - ${currentVelocity.toFixed(2)} - ${currentPianoTimeSec.toFixed(2)} - ${now().toFixed(2)}`);
-          activeNotes.forEach((timeSec, noteNum) => {
-            if (currentPianoTimeSec - timeSec > MAX_NOTE_DURATION_SECONDS) {
+          currentPianoTime += (index - offset + 1) * MS_PER_STEP * globalTempoFactor;
+	  //console.log(`event ${eventType} - ${index - offset + 1} - ${(index - offset + 1) / MS_PER_STEP * globalTempoFactor} - ${currentPianoTime.toFixed(2)} - ${now().toFixed(2)}`);
+          activeNotes.forEach((timeMs, noteNum) => {
+            if (currentPianoTime - timeMs > MAX_NOTE_DURATION) {
               console.info(
                 `Note ${noteNum} has been active for ${
-                   currentPianoTimeSec - timeSec}, ` +
-                  `seconds which is over ${MAX_NOTE_DURATION_SECONDS}, will ` +
+                   currentPianoTime - timeMs}, ` +
+                  `seconds which is over ${MAX_NOTE_DURATION}, will ` +
                 `release.`);
                 activeNotes.delete(noteNum);
                 process.send({'noteoff': [noteNum, 0,-1]});
             }
           });
-          return currentPianoTimeSec;
+          return currentPianoTime;
         } else if (eventType === 'velocity_change') {
           currentVelocity = (index - offset + 1) * Math.ceil(127 / VELOCITY_BINS);
           currentVelocity = currentVelocity / 127;
@@ -128,31 +132,34 @@ async function generate(loopId: number) {
         //console.log(outputs[i]);
         playOutput(outputs[i]);
     }
-    let nowSec=now()/1000.
-    if ((nowSec - currentPianoTimeSec) > MAX_GENERATION_LAG_SECONDS) {
+    if ((now() - currentPianoTime) > MAX_GENERATION_LAG) {
       console.warn(
-          `Generation is ${nowSec - currentPianoTimeSec} seconds behind, ` +
-          `which is over ${MAX_NOTE_DURATION_SECONDS}. Resetting time!`);
-      currentPianoTimeSec = nowSec;
+          `Generation is ${now()} - currentPianoTime} ms behind, ` +
+          `which is over ${MAX_GENERATION_LAG}. Resetting time!`);
+      currentPianoTime = now();
     }
     const delta = Math.max(
-        0, currentPianoTimeSec - nowSec - GENERATION_BUFFER_SECONDS);
-    console.log(`Played ${outputs.length} - now gGenerate new notes in ${delta} secs`);
-    setTimeout(() => generate(loopId), delta * 1000);
+        0, currentPianoTime - now() - GENERATION_BUFFER_TIME);
+    console.log(`LoopId ${loopId} - Played ${outputs.length} - now gGenerate new notes in ${delta} secs`);
+    if (loopId > resetCnt){
+	console.log(`LoopId > resetCnt ${resetCnt} - RESET MODEL!`);
+	prnn.reset();
+    }
+    setTimeout(() => generate(loopId), delta);
 }
 
 
 process.on('message', (msg) => {
    if (msg.init){
-        prnn = new pm.PerformanceRNN('http://127.0.0.1:8010/models/performance_rnn');
+        prnn = new pm.PerformanceRNN(msg.init);
         console.log('initialize');
         prnn.initialize();
-        process.send ({'ns': 'initialized'});
+        process.send ({'status': -1});
    }
    else if (msg.start){
 	if (prnn.isReady()){
 		play=true;
- 		currentPianoTimeSec = now()/1000;
+ 		currentPianoTime = now();
         	prnn.reset();
 		currentLoopId++;
 		generate(currentLoopId);
@@ -169,6 +176,9 @@ process.on('message', (msg) => {
    }
    else if (msg.gain){
 	globalGain=msg.gain;
+   }
+   else if (msg.resetCnt){
+	resetCnt=msg.resetCnt;
    }
    else if (msg.noteDensity){
         prnn.updateNoteDensity(msg.noteDensity);

@@ -10,8 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@tensorflow/tfjs-node": "^1.0.0-alpha2",
-    "@tensorflow/tfjs": "hermaniak/tfjs-core#node",
+    "@tensorflow/tfjs-node": "^1.0.2",
     "@types/node-fetch": "^2.1.6",
     "browser-env": "^3.2.5",
     "canvas": "^2.3.1",

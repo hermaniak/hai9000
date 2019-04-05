@@ -15,6 +15,9 @@ limitations under the License.
 
 
 import * as tf from '@tensorflow/tfjs-node';
+
+// tfjs-node does note proved weightsManifestConfig, get it directly from core...
+import * as tfIoTypes from '@tensorflow/tfjs-core/src/io/types';
 import  node_fetch from 'node-fetch';
 import now = require('performance-now');
 
@@ -194,9 +197,11 @@ export class PerformanceRNN {
       return prev + val;
     });
     for (let i = 0; i < PITCH_HISTOGRAM_SIZE; i++) {
+      console.log(this.pitchHistogram[i] / pitchHistogramTotal);
       buffer.set(this.pitchHistogram[i] / pitchHistogramTotal, i);
     }
     pitchHistogramEncoding = buffer.toTensor();
+    console.log(`conditioning -- density: ${this.noteDensityIdx + 1}, pitchhist: ${buffer}`)
   }
 
   private getConditioning(): tf.Tensor1D {
@@ -275,10 +280,9 @@ export class PerformanceRNN {
      node_fetch(`${this.checkpointURL}/weights_manifest.json`)
       .then((response) => response.json())
       .then(
-                         (manifest: tf.io.WeightsManifestConfig) =>
+                         (manifest: tfIoTypes.WeightsManifestConfig) =>
                              tf.io.loadWeights(manifest, this.checkpointURL))
       .then((vars: {[varName: string]: tf.Tensor}) => {
-	console.log('2');
         lstmKernel1 =
             vars['rnn/multi_rnn_cell/cell_0/basic_lstm_cell/kernel'] as
             tf.Tensor2D;
